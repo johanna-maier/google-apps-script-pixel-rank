@@ -48,16 +48,28 @@ async function httpRequest() {
       return element["type"] === "organic";
     });
 
-    const pixelsTopTen = allOrganicResults.slice(0, 10).map((element) => {
+    const organicInfoPerRanking = allOrganicResults.map((element) => {
+      const position = element["rank_group"];
       const pixelRank = element["rectangle"]["y"];
-      return pixelRank;
+      const url = element["url"];
+      const domain = element["domain"];
+      const title = element["title"];
+      const description = element["description"];
+
+      return {
+        position: position,
+        pixelRank: pixelRank,
+        url: url,
+        domain: domain,
+        title: title,
+        description: description,
+      };
     });
 
-    const totalPixels = pixelsTopTen.reduce((previousValue, currentValue) => {
-      return previousValue + currentValue;
-    }, 0);
-    console.log(pixelsTopTen);
-    console.log(totalPixels);
+    const rankingDomainIn = organicInfoPerRanking.filter((element) => {
+      return element["domain"] === domainIn;
+    });
+    console.log(rankingDomainIn);
 
     // fs.writeFileSync(
     //   `./output/${keywordClean}.json`,

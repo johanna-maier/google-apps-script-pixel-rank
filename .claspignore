@@ -1,1 +1,3 @@
+node_modules/**
 serp-api-connector.js
+Script_Domain_Info.js

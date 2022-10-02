@@ -1,6 +1,6 @@
 {
   "dependencies": {
-    "@types/google-apps-script": "^1.0.54",
+    "@types/google-apps-script": "^1.0.55",
     "axios": "^0.27.2",
     "dotenv": "^16.0.1"
   }
