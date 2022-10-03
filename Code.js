@@ -1,10 +1,11 @@
 // Data for SEO username & password
+// Note: Pixel rank continues on SERP 2
 
 const endpoint =
   "https://api.dataforseo.com/v3/serp/google/organic/live/advanced";
 
 // user input
-const keywordIn = "bike";
+const keywordIn = "Drabiny przystawne";
 const keyword = keywordIn.toLocaleLowerCase();
 const keywordClean = keyword.replace(/\s/g, "-"); // replace spaces - all of them > globally
 const domainIn = "www.canyon.com";
@@ -23,8 +24,8 @@ const options = {
     {
       keyword: keyword,
       calculate_rectangles: true,
-      language_code: "en",
-      location_code: 2480,
+      language_code: "pl",
+      location_code: 2616,
     },
   ]),
   muteHttpExceptions: true,
@@ -56,6 +57,7 @@ async function httpRequest() {
     const totalPixels = pixelsTopTen.reduce((previousValue, currentValue) => {
       return previousValue + currentValue;
     }, 0);
+    console.log(allOrganicResults);
     console.log(pixelsTopTen);
     console.log(totalPixels);
 

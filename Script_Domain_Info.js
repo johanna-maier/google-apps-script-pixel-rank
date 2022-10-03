@@ -1,5 +1,6 @@
 // Data for SEO username & password
-
+const username = "...";
+const pw = "...";
 const endpoint =
   "https://api.dataforseo.com/v3/serp/google/organic/live/advanced";
 
