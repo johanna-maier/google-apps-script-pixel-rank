@@ -15,23 +15,52 @@ function saveAsJSON(json, keyword) {
   Logger.log('ID: %s, File size (bytes): %s, type: %s', file.id, file.fileSize, file.mimeType);
 }
 
-// Add HTTP function trigger to UO
+function removeProcessedKeywords() {
+  const processedKeywordRange = SpreadsheetApp.getActive().getSheetByName('Settings').getRange("D8:D");
+  processedKeywordRange.clearContent();
+}
+
+// Add HTTP function trigger to UI
 function onOpen() {
   let ui = SpreadsheetApp.getUi();
   ui.createMenu('Data for SEO')
     .addItem('Analyse SERPs', 'httpRequest')
+    .addItem('Remove Processed Keywords', 'removeProcessedKeywords')
     .addToUi();
+}
+
+// Functions to parse a list of keywords incl. timer to stop execution of httpRequest function
+
+function rowOfKeyword(keyword){
+  let data = SpreadsheetApp.getActive().getSheetByName('Settings').getRange("A8:A").getValues().flat().filter(r=>r!="");
+  let current_keyword = keyword;
+  
+  for(let i = 0; i < data.length; i++) {
+    if(data[i] == current_keyword){ 
+      Logger.log((i))
+      return i + 8; // + 5 because data list array starts at 0?
+    }
+  }
+}
+
+// https://medium.com/geekculture/bypassing-the-maximum-script-runtime-in-google-apps-script-e510aa9ae6da
+class Timer {
+  start() {
+    this.start = Date.now();
+  }
+
+  getDuration() {
+    return Date.now() - this.start;
+  }
 }
 
 // Data for SEO username, password & endpoint
 // Other user input from settings tab
 
-const username = SpreadsheetApp.getActive().getSheetByName('Settings').getRange("F1").getValue();
-const pw = SpreadsheetApp.getActive().getSheetByName('Settings').getRange("F2").getValue();
-const driveFolderID = SpreadsheetApp.getActive().getSheetByName('Settings').getRange("F3").getValue();
+const username = SpreadsheetApp.getActive().getSheetByName('Settings').getRange("F2").getValue();
+const pw = SpreadsheetApp.getActive().getSheetByName('Settings').getRange("F3").getValue();
+const driveFolderID = SpreadsheetApp.getActive().getSheetByName('Settings').getRange("F4").getValue();
 
-const keywordIn = SpreadsheetApp.getActive().getSheetByName('Settings').getRange("A8").getValue();
-const keywordClean = keywordIn.toLocaleLowerCase().trim().replace(/ +(?= )/g," ");
 const domainIn = SpreadsheetApp.getActive().getSheetByName('Settings').getRange("B4").getValue().toString();
 const paidResultsOn = SpreadsheetApp.getActive().getSheetByName('Settings').getRange("B5").getValue();
 
@@ -45,20 +74,6 @@ const headers = {
 // https://docs_v3.dataforseo.com/v3/keywords-data-se-locations/
 // https://docs_v3.dataforseo.com/v3/keywords-data-se-languages/
 
-const options = {
-  method: "POST",
-  headers: headers,
-  payload: JSON.stringify([
-    {
-      keyword: keywordClean,
-      calculate_rectangles: true,
-      search_param:  SpreadsheetApp.getActive().getSheetByName('Settings').getRange("C5").getValue(),
-      language_code: SpreadsheetApp.getActive().getSheetByName('Settings').getRange("C3").getValue(),
-      location_code: SpreadsheetApp.getActive().getSheetByName('Settings').getRange("C2").getValue()
-    },
-  ]),
-  muteHttpExceptions: true,
-};
 
 const endpoint =
   "https://api.dataforseo.com/v3/serp/google/organic/live/advanced";
@@ -69,34 +84,50 @@ function writeOverviewDataToSheet(serpLayoutOverviewRow) {
   let serpLayoutOverviewSheet = SpreadsheetApp.getActive().getSheetByName("SERP Layout Overview");
   if(!serpLayoutOverviewSheet) {
     serpLayoutOverviewSheet = SpreadsheetApp.getActive().insertSheet("SERP Layout Overview");
-    serpLayoutOverviewSheet.appendRow(["Language Used" , "Location Used" , "Keyword Used" , "Device Used" , "SERP URL Used" , "SERP Item Types", "Pixel Top 10 Organic", "Sum Pixel Top 10 Organic", "Domain Position", "Domain Pixel Rank", "PR 1", "PR 2", "PR 3", "PR 4", "PR 5", "PR 6", "PR 7", "PR 8", "PR 9", "PR 10"]);
-  }
+    serpLayoutOverviewSheet.appendRow(["Language Used" , "Location Used" , "Keyword Used" , "Device Used" , "SERP URL Used" , "SERP Item Types", "Pixel Top 10 Organic", "Sum Pixel Top 10 Organic", "Sum Pixel Top 3 Organic", "Domain Position", "Domain Pixel Rank", "Organic Plus",	"Verticals",	"Knowledge Graph",	"Paid", "PR 1", "PR 2", "PR 3", "PR 4", "PR 5", "PR 6", "PR 7", "PR 8", "PR 9", "PR 10", "Answer Box", "App", "Carousel", "Multi Carousel", "Featured Snippet", "Google Flights", "Google Reviews", "Google Posts", "Images", "Jobs", "Knowledge Graph", "Local Pack", "Hotels Pack", "Map", "Organic", "Paid", "People Also Ask", "Related Searches", "People Also Search", "Shopping", "Top Stories", "Twitter", "Video", "Events", "Mention Carousel", "Recipes", "Top Sights", "Scholarly Articles", "Popular Products", "Podcasts", "Questions And Answers", "Find Results On", "Stocks Box", "Visual Stories", "Commercial Units", "Local Services", "Google Hotels", "Math Solver", "Currency Box", "Found On The Web", "Short Videos", "Product Considerations"]);
+    }
+    serpLayoutOverviewSheet.setFrozenRows(1);
+    serpLayoutOverviewSheet.getRange("1:1").setFontWeight("bold");
    serpLayoutOverviewSheet.appendRow(serpLayoutOverviewRow);
 }
 
 function writeDetailDataToSheet(organicTopTen) {
   const topTen = organicTopTen;
+  let featuredSnippet = false;
+  if (topTen[0]["type"] === "featured_snippet") {
+    featuredSnippet = true;
+  }
 
   let serpLayoutDetailsSheet = SpreadsheetApp.getActive().getSheetByName("SERP Layout Details");
   if(!serpLayoutDetailsSheet) {
     serpLayoutDetailsSheet = SpreadsheetApp.getActive().insertSheet("SERP Layout Details");
     serpLayoutDetailsSheet.appendRow(["Keyword" , "URL" , "Position", "Pixel Rank" , "Title" , "Meta Description"]);
+    serpLayoutDetailsSheet.setFrozenRows(1);
+    serpLayoutDetailsSheet.getRange("1:1").setFontWeight("bold");
   }
 
   topTen.forEach( (ranking) => {
-    const position = ranking["rank_group"];
+    let position;
+    if (featuredSnippet === true && ranking["type"] === "featured_snippet") {
+      position = ranking["rank_group"];
+    } else if (featuredSnippet === true && ranking["type"] != "featured_snippet") {
+      position = ranking["rank_group"] + 1;
+    } else {
+      position = ranking["rank_group"];
+    }
+   
     const url = ranking["url"];
     const title = ranking["title"];
     const description = ranking["description"];
     const pixelRank = ranking["rectangle"]["y"];
 
-    serpLayoutDetailsSheet.appendRow([keywordClean, url, position, pixelRank, title, description]);
+    serpLayoutDetailsSheet.appendRow([current_keyword, url, position, pixelRank, title, description]);
   });
 }
 
 // Make all SERP analysis with JSON data received from API
 function getSerpToOrganicTopTen(data) {
-      const arrayAllSerpResults = data["tasks"][0]["result"][0]["items"];
+    const arrayAllSerpResults = data["tasks"][0]["result"][0]["items"];
 
     // Which element is the 10th organic result?
     const organicResultTen = arrayAllSerpResults.find( (element) => {
@@ -114,7 +145,7 @@ function getSerpToOrganicTopTen(data) {
 
     // Remove paid & shopping serpItems including pixel values from item array
     // Iterate through all results and check if item type falls in "paid" category that might be affected by Google blocks
-    const paidItemTypes = ["shopping", "paid"];
+    const paidItemTypes = ["shopping", "paid", "commercial_units"];
     let paidHeightCounter = 0;
     // https://www.freecodecamp.org/news/how-to-clone-an-array-in-javascript-1d3183468f6a/
     // https://stackoverflow.com/questions/35922429/why-does-a-js-map-on-an-array-modify-the-original-array 
@@ -143,7 +174,7 @@ function getSerpToOrganicTopTen(data) {
       arrayAllSerpResultsToOrganicTen = arrayAllSerpResultsToOrganicTenWithoutPaid;
     }
 
-    // saveAsJSON(arrayAllSerpResultsToOrganicTen, keywordClean);
+    // saveAsJSON(arrayAllSerpResultsToOrganicTen, current_keyword);
 
     return arrayAllSerpResultsToOrganicTen;
 }
@@ -167,18 +198,22 @@ function prepareOverviewData(arrayAllSerpResultsToOrganicTen, topTenOrganicResul
     const totalPixelsOrganic = pixelsTopTenOrganic.reduce((previousValue, currentValue) => {
      return previousValue + currentValue;
     }, 0);
+
+    const totalPixelsTopThree = pixelsTopTenOrganic.slice(0,3).reduce((previousValue, currentValue) => {
+     return previousValue + currentValue;
+    }, 0);
   	
 
     // const serpItemTypesTopHundred = data["tasks"][0]["result"][0]["item_types"].toString();
 
-    const languageUsed = data["tasks"][0]["data"]["language_code"];
-    const locationUsed = data["tasks"][0]["data"]["location_code"];
+    const languageUsed = SpreadsheetApp.getActive().getSheetByName('Settings').getRange("B2").getValue();
+    const locationUsed = SpreadsheetApp.getActive().getSheetByName('Settings').getRange("B3").getValue();
     const keywordUsed = data["tasks"][0]["data"]["keyword"];
     const deviceUsed = data["tasks"][0]["data"]["device"];
     const serpUrl = data["tasks"][0]["result"][0]["check_url"];
 
     const serpItemTypes = [...new Set(serpItemTypesToOrganicTopTen.flat(1))].toString();
-    const formulaPixelRanks = '=split(INDIRECT("R[0]C[-4]";false);",")';
+    const formulaPixelRanks = '=split(INDIRECT("R[0]C7";false);",")';
 
     let domainPosition;
     let domainPixelRank;
@@ -189,42 +224,142 @@ function prepareOverviewData(arrayAllSerpResultsToOrganicTen, topTenOrganicResul
       domainPosition = "not in top 10";
       domainPixelRank = "not in top 10";
     }
+    const formulaSerpItems = '=if(regexmatch(INDIRECT("R[0]C6";false);index('+"'"+'SERP Feature Details'+"'"+'!$A:$A; match(INDIRECT("R1C[0]";false);'+"'"+'SERP Feature Details'+"'"+'!$B:$B;0)));1;0)';
+    const serpItemArray =  Array(42).fill(formulaSerpItems);
 
-    const serpLayoutOverviewRow = [languageUsed, locationUsed, keywordUsed, deviceUsed, serpUrl, serpItemTypes, pixelsTopTenOrganic.toString(), totalPixelsOrganic, domainPosition, domainPixelRank, formulaPixelRanks];
+  	const formulaOrganicPlus = '=sum(arrayformula(if(regexmatch(INDIRECT("R[0]C6";false);filter('+"'"+'SERP Feature Details'+"'"+'!A:A;'+"'"+'SERP Feature Details'+"'"+'!C:C="organic plus"));1;0)))';
+  	const formulaVerticals = '=sum(arrayformula(if(regexmatch(INDIRECT("R[0]C6";false);filter('+"'"+'SERP Feature Details'+"'"+'!A:A;'+"'"+'SERP Feature Details'+"'"+'!C:C="vertical"));1;0)))';
+    const formulaKnowledgeGraph = '=sum(arrayformula(if(regexmatch(INDIRECT("R[0]C6";false);filter('+"'"+'SERP Feature Details'+"'"+'!A:A;'+"'"+'SERP Feature Details'+"'"+'!C:C="knowledge graph"));1;0)))';
+    const formulaPaid = '=sum(arrayformula(if(regexmatch(INDIRECT("R[0]C6";false);filter('+"'"+'SERP Feature Details'+"'"+'!A:A;'+"'"+'SERP Feature Details'+"'"+'!C:C="paid"));1;0)))';
+
+    const serpLayoutOverviewRow = [languageUsed, locationUsed, keywordUsed, deviceUsed, serpUrl, serpItemTypes, pixelsTopTenOrganic.toString(), totalPixelsOrganic, totalPixelsTopThree, domainPosition, domainPixelRank,formulaOrganicPlus,formulaVerticals,formulaKnowledgeGraph,formulaPaid,formulaPixelRanks,,,,,,,,,,].concat(serpItemArray);
 
     return serpLayoutOverviewRow;
 
 }
 
 
+
 // Now we define an asynch function that waits for information of API.
 
 async function httpRequest() {
-  // If things go wrong, we catch the error and do sth with it.
-  try {
-    // We create an URL fetch request to endpoint with options sent in body of request.
-    const response = await UrlFetchApp.fetch(endpoint, options);
-    const data = JSON.parse(response);
-    // Save raw data output to Google Drive folder as reference
-    // saveAsJSON(data, keywordClean);
-
-    const arrayAllSerpResultsToOrganicTen = getSerpToOrganicTopTen(data);
-
-    const topTenOrganicResults = arrayAllSerpResultsToOrganicTen.filter( (element) => {
-      // Featured snippet is reagarded as organic ranking position.
-      return element["type"] === "organic" || element["type"] === "featured_snippet";
-    }).slice(0, 10);
-
-    saveAsJSON(topTenOrganicResults, keywordClean);
-
-    writeDetailDataToSheet(topTenOrganicResults); 
-    const serpLayoutOverviewRow = prepareOverviewData(arrayAllSerpResultsToOrganicTen, topTenOrganicResults, data);
-
-    writeOverviewDataToSheet(serpLayoutOverviewRow);
-
-  } catch (error) {
-    console.log(error);
+  if(username == ""|| pw == "")
+  {
+    throw new Error( "No Data for SEO credentials. Please add them in settings." );
   }
+  // Start timer to avoid execution limits.
+  let timer = new Timer();
+  timer.start();
+  let timeThreshold = 4 * 60 * 1000; // 4000 miliseconds = 4 minutes
+
+  // A1notation gets all cells under "Remaining Keywords" and filters out empty ones.
+  // This way the function can rerun after being interrupted by time-limit.
+  // https://stackoverflow.com/questions/64286235/how-to-get-values-in-a-column-and-put-them-into-an-array-google-sheets
+  let search_term_list = SpreadsheetApp.getActive().getSheetByName('Settings').getRange("E8:E").getValues().flat().filter(r=>r!="");
+  if (search_term_list.length == 0) {
+    // If we proccessed all terms, we can stop the time-based trigger.
+    SpreadsheetApp.getUi().alert('All search terms processed.');
+    let allTriggers = ScriptApp.getProjectTriggers();
+    ScriptApp.deleteTrigger(allTriggers[0]);
+  }
+  // For each keyword in the list, request API with different term and get organic_results.
+
+  // Log current keyword row to create list of analysed keywords.
+  // For of loop to be able to use break statements in if conditions inside loop.
+  // Otherwise: https://bobbyhadz.com/blog/javascript-illegal-break-statement
+  for(const keyword of search_term_list) {
+    // First check if timer is beyond 4 minutes and get out of function if necessary.
+    if (timeThreshold < timer.getDuration()) {
+      // How many keywords are still on the unchecked list?
+      let updated_search_term_list = SpreadsheetApp.getActive().getSheetByName('Settings').getRange("E8:E").getValues().flat().filter(r=>r!="");
+      Logger.log(updated_search_term_list);
+
+      // Do we already have a project trigger active?
+      let allTriggers = ScriptApp.getProjectTriggers();
+      Logger.log(allTriggers);
+
+      if (updated_search_term_list.length == 0) {
+        // If we proccessed all terms, we can stop the time-based trigger.
+        ScriptApp.deleteTrigger(allTriggers[0]);
+        
+        Logger.log("Search list empty");
+        SpreadsheetApp.getUi().alert('All search terms processed.');
+        break;
+
+      } else {
+        // If we still need to process keywords, we either return and keep the already active trigger running
+        // or we create a new trigger.
+        if (allTriggers.length > 0) {
+          Logger.log("Trigger in place");
+          break;
+        } else {
+          ScriptApp.newTrigger('getRankings')
+          .timeBased()
+          .everyMinutes(5)
+          .create();
+          Logger.log("New trigger created");
+          break;
+        }
+        
+      }
+      
+    }
+
+    current_keyword_row = rowOfKeyword(keyword);
+    console.log(current_keyword_row);
+    keyword_cell_string = "A" + current_keyword_row.toString();
+
+    current_keyword = SpreadsheetApp.getActive().getSheetByName('Settings').getRange(keyword_cell_string).getValue().toLocaleLowerCase().trim().replace(/ +(?= )/g," ");
+
+    const options = {
+      method: "POST",
+      headers: headers,
+      payload: JSON.stringify([
+        {
+          keyword: current_keyword,
+          calculate_rectangles: true,
+          search_param:  SpreadsheetApp.getActive().getSheetByName('Settings').getRange("C5").getValue(),
+          language_code: SpreadsheetApp.getActive().getSheetByName('Settings').getRange("C3").getValue(),
+          location_code: SpreadsheetApp.getActive().getSheetByName('Settings').getRange("C2").getValue(),
+          device: SpreadsheetApp.getActive().getSheetByName('Settings').getRange("F5").getValue()
+        },
+      ]),
+      muteHttpExceptions: true,
+    };
+
+    try {
+      // We create an URL fetch request to endpoint with options sent in body of request.
+      const response = await UrlFetchApp.fetch(endpoint, options);
+      const data = JSON.parse(response);
+      // Save raw data output to Google Drive folder as reference
+      saveAsJSON(data, current_keyword);
+
+      const arrayAllSerpResultsToOrganicTen = getSerpToOrganicTopTen(data);
+
+      const topTenOrganicResults = arrayAllSerpResultsToOrganicTen.filter( (element) => {
+        // Featured snippet is reagarded as organic ranking position.
+        return element["type"] === "organic" || element["type"] === "featured_snippet";
+      }).slice(0, 10);
+
+      saveAsJSON(topTenOrganicResults, current_keyword);
+
+      writeDetailDataToSheet(topTenOrganicResults); 
+      const serpLayoutOverviewRow = prepareOverviewData(arrayAllSerpResultsToOrganicTen, topTenOrganicResults, data);
+
+      writeOverviewDataToSheet(serpLayoutOverviewRow);
+
+    } catch (error) {
+      console.log(error);
+    }
+
+  SpreadsheetApp.getActive().getSheetByName('Settings').getRange("D" + current_keyword_row.toString()).setValue(current_keyword);
+
+
+  }
+  Logger.log("Out of keyword loop.")
+
+  // If things go wrong, we catch the error and do sth with it.
+
 }
 
 // Add logic to query an entire keyword list.
@@ -261,7 +396,7 @@ async function httpRequest() {
    // Own button to rerun missing keywords 
 
     // fs.writeFileSync(
-    //   `./output/${keywordClean}.json`,
+    //   `./output/${current_keyword}.json`,
     //   JSON.stringify(rankingDomainIn)
     // );
 
