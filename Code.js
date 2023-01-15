@@ -38,10 +38,6 @@ const paidResultsOn = SpreadsheetApp.getActive()
   .getSheetByName("Settings")
   .getRange("B5")
   .getValue();
-const adwordsDataOn = SpreadsheetApp.getActive()
-  .getSheetByName("Settings")
-  .getRange("F1")
-  .getValue();
 
 function removeProcessedKeywords() {
   const processedKeywordRange = SpreadsheetApp.getActive()
@@ -138,7 +134,8 @@ function writeOverviewDataToSheet(serpLayoutOverviewRow) {
       "Verticals",
       "Knowledge Graph",
       "Paid",
-      "PR 1",
+      "Pixel To First Relevant Rank",
+      "Pixel To First Rank",
       "PR 2",
       "PR 3",
       "PR 4",
@@ -377,6 +374,20 @@ function prepareOverviewData(
       return previousValue + currentValue;
     }, 0);
 
+  const arrayIrrelevantDomains = SpreadsheetApp.getActive()
+    .getSheetByName("Settings")
+    .getRange("G8:G")
+    .getValues()
+    .flat()
+    .filter((r) => r != "");
+
+  const arrayRelevantElements = topTenOrganicResults.filter((element) => {
+    const domainCurrentElement = element["domain"];
+    return !arrayIrrelevantDomains.includes(domainCurrentElement);
+  });
+
+  const pixelToFirstRelevantRanking = arrayRelevantElements[0]["rectangle"]["y"];
+
   // const serpItemTypesTopHundred = data["tasks"][0]["result"][0]["item_types"].toString();
 
   const languageUsed = SpreadsheetApp.getActive()
@@ -459,7 +470,7 @@ function prepareOverviewData(
     '!C:C="paid"));1;0)))';
 
   const formulaCpc =
-    '=iferor(index(CPC!B:B;match(INDIRECT("R[0]C3";false);CPC!A:A;0)),"noCPC data"';
+    '=iferror(index(CPC!B:B;match(INDIRECT("R[0]C3";false);CPC!A:A;0));"no CPC data")';
 
   const serpLayoutOverviewRow = [
     languageUsed,
@@ -478,6 +489,7 @@ function prepareOverviewData(
     formulaVerticals,
     formulaKnowledgeGraph,
     formulaPaid,
+    pixelToFirstRelevantRanking,
     formulaPixelRanks,
     ,
     ,
@@ -496,7 +508,7 @@ function prepareOverviewData(
 // Get adwords data
 
 function writeKeywordDataToSheet(keywordData) {
-  keywordData.result.forEach((result) => {
+  keywordData["tasks"][0]["result"].forEach((result) => {
     const keyword = result.keyword;
     const avgCPC = result.average_cpc;
     let keywordDataSheet = SpreadsheetApp.getActive().getSheetByName("CPC");
@@ -536,7 +548,6 @@ function getAdwordsData() {
   while (keywordList.length > 0) {
     arraysKeywordLists.push(keywordList.splice(0, arrayMaxSize));
   }
-  console.log(arraysKeywordLists.length);
 
   arraysKeywordLists.forEach(async (keywordArray) => {
     const options = {
@@ -544,7 +555,7 @@ function getAdwordsData() {
       headers: headers,
       payload: JSON.stringify([
         {
-          keywords: [keywordArray],
+          keywords: keywordArray,
           match: "exact",
           bid: 999,
           language_code: SpreadsheetApp.getActive()
@@ -554,11 +565,7 @@ function getAdwordsData() {
           location_code: SpreadsheetApp.getActive()
             .getSheetByName("Settings")
             .getRange("C2")
-            .getValue(),
-          search_param: SpreadsheetApp.getActive()
-            .getSheetByName("Settings")
-            .getRange("C5")
-            .getValue(),
+            .getValue()
         },
       ]),
       muteHttpExceptions: true,
@@ -566,26 +573,58 @@ function getAdwordsData() {
 
     try {
       const response = await UrlFetchApp.fetch(endpointAdwords, options);
-      // const keywordData = JSON.parse(response);
+      const keywordData = JSON.parse(response);
+      if(keywordData["tasks_error"] === 1) {
+        SpreadsheetApp.getUi().alert(
+          "Error connecting to DataForSEO Google Ads API. Check the response message below, the dashboard (https://app.dataforseo.com/api-errors) and contact support. \n\n Response details: \n\n" + response
+        );
+        throw new Error("Error connecting to DataForSEO Google Ads API. Response details: " + response );
+      }
       writeKeywordDataToSheet(keywordData);
     } catch (error) {
-      console.log(error);
+      console.log(error);     
     }
   });
 }
 
 // If the Adwords data gets collected after the SERP analysis, it the SERP sheets needs to be updated
 function connectAdwordsData() {
+
+  const serpLayoutOverviewSheet = SpreadsheetApp.getActive().getSheetByName(
+    "SERP Layout Overview"
+  );
+  if (!serpLayoutOverviewSheet) {
+    SpreadsheetApp.getUi().alert(
+      "Overview sheet missing. No SERP analysis executed yet?"
+    );
+    throw new Error("Overview sheet missing. No SERP analysis executed yet?");
+  }
+
+  const CpcSheet = SpreadsheetApp.getActive().getSheetByName(
+      "CPC"
+  );
+  if (!CpcSheet) {
+    SpreadsheetApp.getUi().alert(
+      "CPC sheet missing. No CPC data queried yet?"
+    );
+    throw new Error("CPC sheet missing. No CPC data queried yet?");
+  }
+
   const formulaCpc =
-    '=iferor(index(CPC!B:B;match(INDIRECT("R[0]C3";false);CPC!A:A;0)),"noCPC data"';
+    '=iferror(index(CPC!B:B;match(INDIRECT("R[0]C3";false);CPC!A:A;0));"no CPC data")';
 
   const lastRow = serpLayoutOverviewSheet.getLastRow();
   const rangeCpcColumn = serpLayoutOverviewSheet.getRange(2, 12, lastRow, 1);
-  rangeCpcColumn.each();
-  for (const cell of rangeCpcColumn) {
-    cell.setValue(formulaCpc);
+  const valuesCpcColumn = rangeCpcColumn.getValues();
+  for (let i = 0; i < valuesCpcColumn.length; i++) {
+    // Get the cell in the current row
+    let cell = rangeCpcColumn.getCell(i+1, 1);
+    //Add formula to the cell
+    cell.setFormula(formulaCpc);
   }
-  sleep(1);
+  SpreadsheetApp.flush();
+
+  Utilities.sleep(5000); 
   rangeCpcColumn.copyTo(rangeCpcColumn, { contentsOnly: true });
 }
 
@@ -593,6 +632,9 @@ function connectAdwordsData() {
 
 async function getPixelRanks() {
   if (username == "" || pw == "") {
+    SpreadsheetApp.getUi().alert(
+      "No Data for SEO credentials. Please add them in settings."
+    );
     throw new Error(
       "No Data for SEO credentials. Please add them in settings."
     );
@@ -613,9 +655,12 @@ async function getPixelRanks() {
     .filter((r) => r != "");
   if (search_term_list.length == 0) {
     // If we proccessed all terms, we can stop the time-based trigger.
-    SpreadsheetApp.getUi().alert("All search terms processed.");
     let allTriggers = ScriptApp.getProjectTriggers();
-    ScriptApp.deleteTrigger(allTriggers[0]);
+    if(allTriggers.length > 0) {
+      ScriptApp.deleteTrigger(allTriggers[0]);
+    }
+    SpreadsheetApp.getUi().alert("All search terms processed. Please select 'Remove Processed Keywords' or add additional keywords to column A.");
+    throw new Error("All search terms processed. Please select 'Remove Processed Keywords' or add additional keywords to column A.");
   }
   // For each keyword in the list, request API with different term and get organic_results.
 
@@ -658,8 +703,8 @@ async function getPixelRanks() {
         }
       }
     }
-
     current_keyword_row = rowOfKeyword(keyword);
+
     keyword_cell_string = "A" + current_keyword_row.toString();
 
     current_keyword = SpreadsheetApp.getActive()
@@ -700,11 +745,16 @@ async function getPixelRanks() {
 
     try {
       // We create an URL fetch request to endpoint with options sent in body of request.
-      // const response = await UrlFetchApp.fetch(endpointSerp, options);
-      // const data = JSON.parse(response);
+      const response = await UrlFetchApp.fetch(endpointSerp, options);
+      const data = JSON.parse(response);
       // Save raw data output to Google Drive folder as reference
       // saveAsJSON(data, current_keyword);
-
+      if(data["tasks_error"] === 1) {
+        SpreadsheetApp.getUi().alert(
+          "Error connecting to DataForSEO Google SERP API. Check the response message below, the dashboard (https://app.dataforseo.com/api-errors) and contact support. \n\n Response details: \n\n" + response
+        );
+        throw new Error("Error connecting to DataForSEO Google SERP API. Response details: " + response );
+      }
       const arrayAllSerpResultsToOrganicTen = getSerpToOrganicTopTen(data);
 
       const topTenOrganicResults = arrayAllSerpResultsToOrganicTen
@@ -729,8 +779,10 @@ async function getPixelRanks() {
       writeOverviewDataToSheet(serpLayoutOverviewRow);
     } catch (error) {
       console.log(error);
-    }
+      break
 
+    }
+    
     SpreadsheetApp.getActive()
       .getSheetByName("Settings")
       .getRange("D" + current_keyword_row.toString())
