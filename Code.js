@@ -120,7 +120,6 @@ function cleanKeywordInput() {
 
   const input = userKeywordInput.getValues().flat().map((keyword) => keyword.trim());
   const userKeywordInputUnique = [...new Set(input)];
-  console.log(userKeywordInputUnique)
   var toAddArray = [];
   for (i = 0; i < userKeywordInputUnique.length; ++i){
       toAddArray.push([userKeywordInputUnique[i]]);
@@ -236,8 +235,10 @@ function writeOverviewDataToSheet(serpLayoutOverviewRow) {
   rangeLastRow.copyTo(rangeLastRow, { contentsOnly: true });
 }
 
-function writeDetailDataToSheet(organicTopTen) {
+function writeDetailDataToSheet(organicTopTen, current_keyword) {
   const topTen = organicTopTen;
+  const keyword = current_keyword;
+
   let featuredSnippet = false;
   if (topTen[0]["type"] === "featured_snippet") {
     featuredSnippet = true;
@@ -286,7 +287,7 @@ function writeDetailDataToSheet(organicTopTen) {
     const pixelRank = Math.round(ranking["rectangle"]["y"]);
 
     serpLayoutDetailsSheet.appendRow([
-      current_keyword,
+      keyword,
       url,
       position,
       pixelRank,
@@ -555,7 +556,6 @@ function writeKeywordDataToSheet(keywordData) {
       keywordDataArray.push([keyword, avgCPC]);
     }
   });
-  console.log(keywordDataArray);
 
   let keywordDataSheet = SpreadsheetApp.getActive().getSheetByName("CPC");
 
@@ -731,7 +731,7 @@ async function getPixelRanks() {
 
       // saveAsJSON(topTenOrganicResults, current_keyword);
 
-      writeDetailDataToSheet(topTenOrganicResults);
+      writeDetailDataToSheet(topTenOrganicResults, current_keyword);
 
       const serpLayoutOverviewRow = prepareOverviewData(
         arrayAllSerpResultsToOrganicTen,
@@ -858,6 +858,7 @@ function connectAdwordsData() {
   Utilities.sleep(5000); 
   rangeCpcColumn.copyTo(rangeCpcColumn, { contentsOnly: true });
 }
+
 
 
 
