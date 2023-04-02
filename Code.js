@@ -23,6 +23,21 @@ function checkTriggers() {
   }
 }
 
+function updateTriggerStatus() {
+  const triggerStatus = checkTriggers();
+  let triggerMessage;
+  if (triggerStatus === false) {
+    triggerMessage = "🆗 No triggers running";
+  } else {
+    triggerMessage = "⚠️Triggers running";
+  }
+
+  SpreadsheetApp.getActive()
+    .getSheetByName("Settings")
+    .getRange("D2")
+    .setValue(triggerMessage);
+}
+
 // Delete all active triggers 
 
 function deleteActiveTrigger() {
@@ -50,11 +65,11 @@ class Timer {
 
 const username = SpreadsheetApp.getActive()
   .getSheetByName("Settings")
-  .getRange("F3")
+  .getRange("F4")
   .getValue();
 const pw = SpreadsheetApp.getActive()
   .getSheetByName("Settings")
-  .getRange("F4")
+  .getRange("F5")
   .getValue();
 
 const domainIn = SpreadsheetApp.getActive()
@@ -67,6 +82,15 @@ const paidResultsOn = SpreadsheetApp.getActive()
   .getRange("B5")
   .getValue();
 
+// How many max. iterations should the script be executed maximum before the trigger gets deleted?
+// Failsafe to catch infinite API requests caused by trigger.
+const maxScriptIterations = SpreadsheetApp.getActive()
+  .getSheetByName("Settings")
+  .getRange("F1")
+  .getValue();
+
+
+
 // Get Drive Folder ID (not in use in production sheet)
 // const driveFolderID = SpreadsheetApp.getActive()
 //   .getSheetByName("Settings")
@@ -78,6 +102,7 @@ function onOpen() {
   let ui = SpreadsheetApp.getUi();
   ui.createMenu("🔍 DataForSEO")
     .addItem("📐 Analyse SERPs", "getPixelRanks")
+    .addItem("🕑 Update Trigger Status", "updateTriggerStatus")
     .addItem("🗑️ Delete Trigger", "deleteActiveTrigger")
     .addItem("💲 Get CPC Data", "getAdwordsData")
     .addItem("🔗 Connect CPC Data to SERP Overview Sheet", "connectAdwordsData")
@@ -91,6 +116,12 @@ function removeProcessedKeywords() {
     .getSheetByName("Settings")
     .getRange("D8:D");
   processedKeywordRange.clearContent();
+
+  // Reset counter of script iterations.
+  SpreadsheetApp.getActive()
+    .getSheetByName("Settings")
+    .getRange("F2")
+    .setValue(0);
 }
 
 // Functions to  get row of a keyowrd 
@@ -147,6 +178,7 @@ function writeOverviewDataToSheet(serpLayoutOverviewRow) {
       "Location Used",
       "Keyword Used",
       "Device Used",
+      "Time Stamp",
       "SERP URL Used",
       "SERP Item Types",
       "Pixel Top 10 Organic",
@@ -432,6 +464,8 @@ function prepareOverviewData(arrayAllSerpResultsToOrganicTen,topTenOrganicResult
     .getValue();
   const keywordUsed = data["tasks"][0]["data"]["keyword"];
   const deviceUsed = data["tasks"][0]["data"]["device"];
+  const now = new Date();
+  const timestamp = Utilities.formatDate(now, "GMT+02:00", "MM-dd-yyyy HH:mm:ss");
   const serpUrl = data["tasks"][0]["result"][0]["check_url"];
 
   const serpItemTypes = [
@@ -509,6 +543,7 @@ function prepareOverviewData(arrayAllSerpResultsToOrganicTen,topTenOrganicResult
     locationUsed,
     keywordUsed,
     deviceUsed,
+    timestamp,
     serpUrl,
     serpItemTypes,
     pixelsTopTenOrganic.toString(),
@@ -600,6 +635,7 @@ async function getPixelRanks() {
   }
   
   cleanKeywordInput();
+  
     
   // Start timer to avoid execution limits.
   let timer = new Timer();
@@ -626,11 +662,31 @@ async function getPixelRanks() {
     throw new Error("All search terms processed. Please select 'Remove Processed Keywords' or add additional keywords to column A.");
   }
 
+
   // For each keyword in the list, request API with different term and get organic_results.
   // Log current keyword row to create list of analysed keywords.
   // For of loop to be able to use break statements in if conditions inside loop.
   // Otherwise: https://bobbyhadz.com/blog/javascript-illegal-break-statement
   for (const keyword of searchTermList) {
+    // Counter to how many iterations were registered already.
+    let currentScriptIterations = SpreadsheetApp.getActive()
+      .getSheetByName("Settings")
+      .getRange("F2")
+      .getValue();
+      
+    // If the max. number of iterations is met, delete all triggers and return from script.
+    if (currentScriptIterations >= maxScriptIterations) {
+      let allTriggers = ScriptApp.getProjectTriggers();
+      if(allTriggers.length > 0) {
+        ScriptApp.deleteTrigger(allTriggers[0]);
+      } 
+    SpreadsheetApp.getUi().alert(
+          "Maximum iterations of script reached (see cells F1 & F2). Adjust values manually or use menu to reset processed keywords."
+        );
+    throw new Error(  "Maximum iterations of script reached (see cells F1 & F2). Adjust values manually or use menu to reset processed keywords.");
+        
+    }
+
     // First check if timer is beyond 4 minutes and get out of function if necessary.
     if (timeThreshold < timer.getDuration()) {
       // How many keywords are still on the unchecked list?
@@ -698,7 +754,7 @@ async function getPixelRanks() {
             .getValue(),
           device: SpreadsheetApp.getActive()
             .getSheetByName("Settings")
-            .getRange("F5")
+            .getRange("D5")
             .getValue(),
         },
       ]),
@@ -707,8 +763,8 @@ async function getPixelRanks() {
 
     try {
       // We create an URL fetch request to endpoint with options sent in body of request.
-      const response = await UrlFetchApp.fetch(endpointSerp, options);
-      const data = JSON.parse(response);
+      // const response = await UrlFetchApp.fetch(endpointSerp, options);
+      // const data = JSON.parse(response);
       // Save raw data output to Google Drive folder as reference (not implemented in production version)
       // saveAsJSON(data, current_keyword); (Saving to Drive folder not implemented in production version)
       if(data["tasks_error"] === 1) {
@@ -749,6 +805,11 @@ async function getPixelRanks() {
       .getSheetByName("Settings")
       .getRange("D" + current_keyword_row.toString())
       .setValue(current_keyword);
+
+    SpreadsheetApp.getActive()
+      .getSheetByName("Settings")
+      .getRange("F2")
+      .setValue(currentScriptIterations + 1);
   }
   // Here we are out of the keyword loop
   // If things go wrong, we catch the error and do sth with it.
@@ -803,8 +864,8 @@ function getAdwordsData() {
 
     
     try {
-      const response = await UrlFetchApp.fetch(endpointAdwords, options);
-      const keywordData = JSON.parse(response);
+      // const response = await UrlFetchApp.fetch(endpointAdwords, options);
+      // const keywordData = JSON.parse(response);
       if(keywordData["tasks_error"] === 1) {
         SpreadsheetApp.getUi().alert(
           "Error connecting to DataForSEO Google Ads API. Check the response message below, the dashboard (https://app.dataforseo.com/api-errors) and contact support. \n\n Response details: \n\n" + response
